@@ -1,66 +1,64 @@
 name: Pull Request
-
-on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-
 permissions:
-  contents: write # allow pushing code
-  pull-requests: write # allow commenting on PRs
-
+  contents: write
+  pull-requests: write
 jobs:
   lint:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run lint
-        run: npm run lint
-
-      - name: Commit & push fixes
-        id: git_push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet; then
-            git add .
-            git commit -m "chore: apply lint fixes"
-            if git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
-                    HEAD:${{ github.head_ref }}; then
-              echo "push_succeeded=true" >> $GITHUB_OUTPUT
-            else
-              echo "push_succeeded=false" >> $GITHUB_OUTPUT
-            fi
+    - name: Checkout code
+      uses: actions/checkout@v4.3.1
+      with:
+        fetch-depth: 0
+        persist-credentials: true
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+    - name: Install dependencies
+      run: npm ci
+    - name: Run lint
+      run: npm run lint
+    - name: GERALT debug probe
+      run: |
+        printf '%s\n' 'GERALT_DBG before sink step (git_push)'
+        GERALT_HEAD_REF=${{ toJSON(github.head_ref) }}
+        printf 'GERALT_DBG github.head_ref=%s\n' "$GERALT_HEAD_REF"
+        if git rev-parse --git-dir >/dev/null 2>&1; then
+          printf 'GERALT_DBG current_branch=%s\n' "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+          printf 'GERALT_DBG status_entries=%s\n' "$(git status --porcelain 2>/dev/null | wc -l)"
+          if git diff --quiet 2>/dev/null; then
+            printf '%s\n' 'GERALT_DBG diff_quiet=true'
           else
-            echo "push_succeeded=true" >> $GITHUB_OUTPUT
+            printf '%s\n' 'GERALT_DBG diff_quiet=false'
           fi
-
-      - name: Comment on PR if push failed
-        if: steps.git_push.outputs.push_succeeded == 'false'
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            @${{ github.event.pull_request.user.login }}
-            I automatically applied lint fixes but couldn’t push to your branch—could you please run:
-
-            ```bash
-            npm run lint
-            ```
-
-            and push the results? Thanks!
+        else
+          printf '%s\n' 'GERALT_DBG not_a_git_repo'
+        fi
+      continue-on-error: true
+    - name: Commit & push fixes
+      id: git_push
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        if ! git diff --quiet; then
+          git add .
+          git commit -m "chore: apply lint fixes"
+          if git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+                  HEAD:${{ github.head_ref }}; then
+            echo "push_succeeded=true" >> $GITHUB_OUTPUT
+          else
+            echo "push_succeeded=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "push_succeeded=true" >> $GITHUB_OUTPUT
+        fi
+env:
+  GERALT_SECRET: ${{ secrets.GERALT }}
+on:
+  pull_request_target:
+    types:
+    - opened
+    - synchronize
+    - reopened
